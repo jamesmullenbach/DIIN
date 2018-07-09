@@ -16,9 +16,11 @@ import gzip
 import pickle
 
 
+# JAMES: handles arg parsing and stuff
 FIXED_PARAMETERS, config = params.load_parameters()
 modname = FIXED_PARAMETERS["model_name"]
 
+# JAMES: logging config
 if not os.path.exists(FIXED_PARAMETERS["log_path"]):
     os.makedirs(FIXED_PARAMETERS["log_path"])
 if not os.path.exists(config.tbpath):
@@ -33,6 +35,7 @@ logger = logger.Logger(logpath)
 
 model = FIXED_PARAMETERS["model_type"]
 
+# JAMES: get appropriate class
 module = importlib.import_module(".".join(['models', model])) 
 MyModel = getattr(module, 'MyModel')
 
@@ -51,6 +54,7 @@ if config.debug_model:
     indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences([test_matched])
     shared_content = load_mnli_shared_content()
 else:
+    # JAMES: load data
 
     logger.Log("Loading data SNLI")
     training_snli = load_nli_data(FIXED_PARAMETERS["training_snli"], snli=True)
@@ -73,10 +77,10 @@ else:
 config.char_vocab_size = len(char_indices.keys())
 
 
+# JAMES: make embedding path
 embedding_dir = os.path.join(config.datapath, "embeddings")
 if not os.path.exists(embedding_dir):
     os.makedirs(embedding_dir)
-
 
 embedding_path = os.path.join(embedding_dir, "mnli_emb_snli_embedding.pkl.gz")
 
@@ -110,15 +114,12 @@ class modelClassifier:
         self.alpha = FIXED_PARAMETERS["alpha"]
         self.config = config
 
-        
 
-
+        # JAMES: create model
         logger.Log("Building model from %s.py" %(model))
         self.model = MyModel(self.config, seq_length=self.sequence_length, emb_dim=self.embedding_dim,  hidden_dim=self.dim, embeddings=loaded_embeddings, emb_train=self.emb_train)
 
         self.global_step = self.model.global_step
-
-
 
         # Perform gradient descent with Adam
         if not config.test:
@@ -126,7 +127,6 @@ class modelClassifier:
             grads, _ = tf.clip_by_global_norm(tf.gradients(self.model.total_cost, tvars), config.gradient_clip_value)
             opt = tf.train.AdadeltaOptimizer(self.learning_rate)
             self.optimizer = opt.apply_gradients(zip(grads, tvars), global_step=self.global_step)
-
 
         # tf things: initialize variables and create placeholder for session
         self.tb_writer = tf.summary.FileWriter(config.tbpath)
@@ -136,20 +136,16 @@ class modelClassifier:
         self.sess = None
         self.saver = tf.train.Saver()
 
-
-
-
-
     def get_minibatch(self, dataset, start_index, end_index, training=False):
+
+        # JAMES: data processing per batch
         indices = range(start_index, end_index)
 
         genres = [dataset[i]['genre'] for i in indices]
         labels = [dataset[i]['label'] for i in indices]
         pairIDs = np.array([dataset[i]['pairID'] for i in indices])
 
-
         premise_pad_crop_pair = hypothesis_pad_crop_pair = [(0,0)] * len(indices)
-
 
         premise_vectors = fill_feature_vector_with_cropping_or_padding([dataset[i]['sentence1_binary_parse_index_sequence'][:] for i in indices], premise_pad_crop_pair, 1)
         hypothesis_vectors = fill_feature_vector_with_cropping_or_padding([dataset[i]['sentence2_binary_parse_index_sequence'][:] for i in indices], hypothesis_pad_crop_pair, 1)
@@ -165,7 +161,6 @@ class modelClassifier:
         premise_exact_match = np.expand_dims(premise_exact_match, 2)
         hypothesis_exact_match = np.expand_dims(hypothesis_exact_match, 2)
 
-
         return premise_vectors, hypothesis_vectors, labels, genres, premise_pos_vectors, \
                 hypothesis_pos_vectors, pairIDs, premise_char_vectors, hypothesis_char_vectors, \
                 premise_exact_match, hypothesis_exact_match
@@ -173,7 +168,7 @@ class modelClassifier:
 
 
     def train(self, train_mnli, train_snli, dev_mat, dev_mismat, dev_snli):
-        sess_config = tf.ConfigProto()
+        sess_config = tf.ConfigProto(log_device_placement=True)
         sess_config.gpu_options.allow_growth=True   
         self.sess = tf.Session(config=sess_config)
         self.sess.run(self.init)
@@ -477,11 +472,6 @@ class modelClassifier:
         logits = np.argmax(logits[1:], axis=1)
         save_submission(path, IDs, logits[1:])
 
-
-
-
-
-
 classifier = modelClassifier()
 
 """
@@ -491,7 +481,6 @@ load the best checkpoint and get accuracy on the test set. Default setting is to
 
 test = params.train_or_test()
 
-
 if config.preprocess_data_only:
     pass
 elif test == False:
@@ -499,8 +488,6 @@ elif test == False:
     logger.Log("Acc on matched multiNLI dev-set: %s" %(evaluate_classifier(classifier.classify, dev_matched, FIXED_PARAMETERS["batch_size"]))[0])
     logger.Log("Acc on mismatched multiNLI dev-set: %s" %(evaluate_classifier(classifier.classify, dev_mismatched, FIXED_PARAMETERS["batch_size"]))[0])
     logger.Log("Acc on SNLI test-set: %s" %(evaluate_classifier(classifier.classify, test_snli, FIXED_PARAMETERS["batch_size"]))[0])
-
-
 
     if config.training_completely_on_snli:
         logger.Log("Generating SNLI dev pred")
@@ -510,7 +497,6 @@ elif test == False:
         logger.Log("Generating SNLI test pred")
         test_snli_path = os.path.join(FIXED_PARAMETERS["log_path"], "snli_test_{}.csv".format(modname))
         classifier.generate_predictions_with_id(test_snli_path, test_snli)
-        
     else:
         logger.Log("Generating dev matched answers.")
         dev_matched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_matched_submission_{}.csv".format(modname))
