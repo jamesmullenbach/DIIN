@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
-import numpy as np
-import re
-import random
-import json
 import collections
-import numpy as np
-import util.parameters as params
-from tqdm import tqdm
-import nltk
-from nltk.corpus import wordnet as wn 
+import csv
+import json
+import multiprocessing
 import os
 import pickle
-import multiprocessing
+import random
+import re
+
+import util.parameters as params
+
+import nltk
+from nltk.corpus import wordnet as wn 
 from nltk.tag import StanfordNERTagger
 from nltk.tag import StanfordPOSTagger
+import numpy as np
+from tqdm import tqdm
 
 FIXED_PARAMETERS, config = params.load_parameters()
 
@@ -23,6 +25,8 @@ LABEL_MAP = {
     "contradiction": 2,
     "hidden": -1
 }
+
+PW_LABEL_MAP = [1,1,1,0,0]
 
 PADDING = "<PAD>"
 POS_Tagging = [PADDING, 'WP$', 'RBS', 'SYM', 'WRB', 'IN', 'VB', 'POS', 'TO', ':', '-RRB-', '$', 'MD', 'JJ', '#', 'CD', '``', 'JJR', 'NNP', "''", 'LS', 'VBP', 'VBD', 'FW', 'RBR', 'JJS', 'DT', 'VBG', 'RP', 'NNS', 'RB', 'PDT', 'PRP$', '.', 'XX', 'NNPS', 'UH', 'EX', 'NN', 'WDT', 'VBN', 'VBZ', 'CC', ',', '-LRB-', 'PRP', 'WP']
@@ -50,6 +54,25 @@ def load_nli_data(path, snli=False, shuffle = True):
             loaded_example["label"] = LABEL_MAP[loaded_example["gold_label"]]
             if snli:
                 loaded_example["genre"] = "snli"
+            data.append(loaded_example)
+        if shuffle:
+            random.seed(1)
+            random.shuffle(data)
+    return data
+
+def load_pw_data(path, shuffle=True):
+    """
+    Load part-whole data.
+    """
+    data = []
+    with open(path, encoding='utf-8') as f:
+        r = csv.reader(f, delimiter='\t')
+        #header
+        next(r)
+        for row in r:
+            loaded_example = collections.defaultdict(str, {'sentence1': row[3], 'sentence2': row[4]})
+            loaded_example["label"] = PW_LABEL_MAP[int(row[5])]
+            loaded_example["genre"] = "pw"
             data.append(loaded_example)
         if shuffle:
             random.seed(1)
@@ -111,8 +134,6 @@ def is_antonyms(token1, token2):
                 for lemma in lemma_syn.lemmas():
                     for antonym in lemma.antonyms():
                         antonym_lists_for_token2.append(antonym.name())
-                        # if token1_stem == stemmer.stem(antonym.name()):
-                        #     return True 
     antonym_lists_for_token2 = list(set(antonym_lists_for_token2))
     for atnm in antonym_lists_for_token2:
         if token1_stem == stemmer.stem(atnm):
@@ -149,8 +170,6 @@ def worker(shared_content, dataset):
             content['sentence1_token_exact_match_with_s2'] = s1_token_exact_match
             content['sentence2_token_exact_match_with_s1'] = s2_token_exact_match
             shared_content[example["pairID"]] = content
-            # print(shared_content[example["pairID"]])
-    # print(shared_content)
 
 def load_shared_content(fh, shared_content):
     for line in fh:
@@ -161,24 +180,14 @@ def load_shared_content(fh, shared_content):
 
 def load_mnli_shared_content():
     shared_file_exist = False
-    # shared_path = config.datapath + "/shared_2D_EM.json"
-    # shared_path = config.datapath + "/shared_anto.json"
-    # shared_path = config.datapath + "/shared_NER.json"
     shared_path = config.datapath + "/shared.jsonl"
-    # shared_path = "../shared.json"
     print(shared_path)
     if os.path.isfile(shared_path):
         shared_file_exist = True
-    # shared_content = {}
     assert shared_file_exist
-    # if not shared_file_exist and config.use_exact_match_feature:
-    #     with open(shared_path, 'w') as f:
-    #         json.dump(dict(reconvert_shared_content), f)
-    # elif config.use_exact_match_feature:
     with open(shared_path) as f:
         shared_content = {}
         load_shared_content(f, shared_content)
-        # shared_content = json.load(f)
     return shared_content
 
 def sentences_to_padded_index_sequences(datasets):
@@ -195,19 +204,7 @@ def sentences_to_padded_index_sequences(datasets):
 
     word_counter = collections.Counter()
     char_counter = collections.Counter()
-    # mgr = multiprocessing.Manager()
-    # shared_content = mgr.dict()
-    # process_num = config.num_process_prepro
-    # process_num = 1
     for i, dataset in enumerate(datasets):
-        # if not shared_file_exist:
-        #     num_per_share = len(dataset) / process_num + 1
-        #     jobs = [ multiprocessing.Process(target=worker, args=(shared_content, dataset[i * num_per_share : (i + 1) * num_per_share] )) for i in range(process_num)]
-        #     for j in jobs:
-        #         j.start()
-        #     for j in jobs:
-        #         j.join()
-
         for example in tqdm(dataset):
             s1_tokenize = tokenize(example['sentence1_binary_parse'])
             s2_tokenize = tokenize(example['sentence2_binary_parse'])
@@ -220,20 +217,12 @@ def sentences_to_padded_index_sequences(datasets):
             for word in s2_tokenize:
                 char_counter.update([c for c in word])
 
-        # shared_content = {k:v for k, v in shared_content.items()}
-
-
-
-    
-
-
     vocabulary = set([word for word in word_counter])
     vocabulary = list(vocabulary)
     if config.embedding_replacing_rare_word_with_UNK: 
         vocabulary = [PADDING, "<UNK>"] + vocabulary
     else:
         vocabulary = [PADDING] + vocabulary
-    # print(char_counter)
     word_indices = dict(zip(vocabulary, range(len(vocabulary))))
     indices_to_words = {v: k for k, v in word_indices.items()}
     char_vocab = set([char for char in char_counter])
@@ -471,8 +460,6 @@ def generate_manual_sample_minibatch(s1_tokenize, s2_tokenize, word_indices, cha
         hypothesis_pos_vectors[0, idx, POS_dict[tag]] = 1
 
 
-    # s1_ner = nst.tag(s1_tokenize)
-    # s2_ner = nst.tag(s2_tokenize)
 
     # not used
     labels = np.zeros((1))
@@ -637,7 +624,6 @@ def save_submission(path, ids, pred_ids):
     for i in range(ids.shape[0]):
         pred = pred_ids[i]
         f.write("{},{}\n".format(str(ids[i]), reverse_label_map[str(pred)]))
-        # f.write("{},{}\n".format(str(ids[i]), str(pred)))
     f.close()
 
 

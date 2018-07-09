@@ -63,7 +63,6 @@ pa("--eval_step", type=int, default=1000, help='eval step')
 pa("--l2_regularization_ratio", type=float, default=9e-5, help='l2 regularization ratio') ##
 pa("--training_completely_on_snli", action='store_true', help='train completely on snli')
 pa("--use_lr_decay",action='store_true',help='lr decay')
-# pa("--lr_decay_rate", type=float, default=0.99, help='lr decay rate')
 pa("--use_label_smoothing", action='store_true', help='label smoothing')
 pa("--label_smoothing_ratio", type=float, default=0.05, help='label smoothing ratio')
 
@@ -71,9 +70,6 @@ pa("--label_smoothing_ratio", type=float, default=0.05, help='label smoothing ra
 pa("--l2_loss", action='store_false', help='have l2 loss') ##
 pa("--gradient_clip_value", default=1.0, type=float, help='gradient clip value')
 pa("--show_by_step", action='store_true', help='show by step')
-
-
-
 
 pa("--pos_tagging", action='store_true', help="part of speech tagging enabled") ##
 
@@ -182,7 +178,10 @@ pa("--debug", action='store_true', help='debug mode')
 pa("--use_final_state", action='store_true', help='use final states with of the lstm')
 pa("--visualize_dense_attention_logits", action='store_true', help='visualize the attention logits in dense attention')
 
-
+# JAMES: part-whole args
+pa("--finetune", action="store_true", help="load saved model, and train it further on part-whole train set")
+pa("--train_pw_only", action="store_true", help="train new model on just the part-whole dataset")
+pa("--test_pw_only", action="store_true", help="evaluate a saved model on just the part-whole dev set")
 
 args = parser.parse_args()
 
@@ -198,6 +197,9 @@ def load_parameters():
         "training_snli": "{}/snli_1.0/snli_1.0_train.jsonl".format(args.datapath),
         "dev_snli": "{}/snli_1.0/snli_1.0_dev.jsonl".format(args.datapath),
         "test_snli": "{}/snli_1.0/snli_1.0_test.jsonl".format(args.datapath),
+        "train_pws": "{}/pws/train.csv".format(args.datapath),
+        "dev_pws": "{}/pws/dev.csv".format(args.datapath),
+        "test_pws": "{}/pws/test.csv".format(args.datapath),
         "embedding_data_path": "{}/glove.840B.300d.txt".format(args.datapath),
         "log_path": "{}/{}".format(args.logpath, args.model_name),
         "ckpt_path":  "{}/{}".format(args.ckptpath, args.model_name),
@@ -216,5 +218,6 @@ def load_parameters():
     return FIXED_PARAMETERS, args
 
 def train_or_test():
-    return args.test
+    #return true if we should NOT train
+    return args.test or args.test_pw_only
 

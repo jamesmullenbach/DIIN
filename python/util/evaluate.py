@@ -2,15 +2,7 @@ from util.data_processing import LABEL_MAP
 import util.parameters as params
 FIXED_PARAMETERS, config = params.load_parameters()
 
-# LABEL_MAP = {
-#     "entailment": 0,
-#     "neutral": 1,
-#     "contradiction": 2,
-#     "hidden": -1
-# }
-
-
-def evaluate_classifier(classifier, eval_set, batch_size):
+def evaluate_classifier(classifier, eval_set, batch_size, pw=False):
     """
     Function to get accuracy and cost of the model, evaluated on a chosen dataset.
 
@@ -19,9 +11,8 @@ def evaluate_classifier(classifier, eval_set, batch_size):
     batch_size: the size of minibatches.
     """
     correct = 0
-    genres, hypotheses, cost = classifier(eval_set)
+    _, hypotheses, cost = classifier(eval_set, pw=pw)
     cost = cost / (len(eval_set) / batch_size)
-    # full_batch = int(len(eval_set) / batch_size) * batch_size
 
     confusion_matrix = [[0,0,0] for i in range(3)]
 
@@ -36,6 +27,9 @@ def evaluate_classifier(classifier, eval_set, batch_size):
     for i in range(hypotheses.shape[0]):
         hypothesis = hypotheses[i]
         label = eval_set[i]['label']
+        #coalesce neutral and contradiction into "non-entailment" for PW
+        if pw and hypothesis == 2:
+            hypothesis = 1
         if hypothesis == label:
             correct += 1 
         confusion_matrix[label][hypothesis] += 1 
