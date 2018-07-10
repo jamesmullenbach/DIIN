@@ -70,9 +70,10 @@ def load_pw_data(path, shuffle=True):
         #header
         #next(r)
         for row in f:
-            loaded_example = json.loads(row)
+            loaded_example = collections.defaultdict(str, json.loads(row))
             #transform from ordinal scale to binary entailment vs. non-entailment
-            loaded_example['label'] = PW_LABEL_MAP[loaded_example[label]]
+            loaded_example['label'] = PW_LABEL_MAP[int(loaded_example['label'])]
+            loaded_example['gold_label'] = loaded_example['label']
             loaded_example['genre'] = 'pw'
             data.append(loaded_example)
         if shuffle:
@@ -263,7 +264,6 @@ def sentences_to_padded_index_sequences(datasets):
                             else:
                                 index = char_indices[chars[j]]
                             example[sentence + '_char_index'][i,j] = index 
-    
 
     return indices_to_words, word_indices, char_indices, indices_to_char
 

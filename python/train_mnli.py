@@ -83,7 +83,8 @@ else:
     logger.Log("Loading embeddings")
     if config.finetune or config.train_pw_only or config.test_pw_only:
         #datasets = [training_pw, dev_pw, test_pw]
-        datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
+        #still need other datasets so we can use models trained on (S/M)NLI
+        datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli, training_pw, dev_pw, test_pw]
     else:
         datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
     indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
@@ -392,7 +393,6 @@ class modelClassifier:
                     break
 
     def classify(self, examples, pw=False):
-        import pdb; pdb.set_trace()
         # This classifies a list of examples
         if (test == True) or (self.completed == True):
             best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_best"
@@ -436,11 +436,13 @@ class modelClassifier:
 
         if test == True:
             logger.Log("Generating Classification error analysis script")
-            correct_file = open(os.path.join(FIXED_PARAMETERS["log_path"], "correctly_classified_pairs.txt"), 'w')
-            wrong_file = open(os.path.join(FIXED_PARAMETERS["log_path"], "wrongly_classified_pairs.txt"), 'w')
+            correct_fname = "correctly_classified_pairs.txt" if not pw else "correctly_classified_pairs_pw.txt"
+            correct_file = open(os.path.join(FIXED_PARAMETERS["log_path"], correct_fname), 'w')
+            wrong_fname = "wrongly_classified_pairs.txt" if not pw else "wrongly_classified_pairs_pw.txt"
+            wrong_file = open(os.path.join(FIXED_PARAMETERS["log_path"], wrong_fname), 'w')
 
             pred = np.argmax(logits[1:], axis=1)
-            LABEL = ["entailment", "neutral", "contradiction"]
+            LABEL = ["entailment", "neutral", "contradiction"] if not pw else ["entailment", "non-entailment"]
             for i in tqdm(range(pred.shape[0])):
                 #coalesce neutral and contradiction into "non-entailment" for PW
                 if pred[i] == examples[i]["label"] or (pw and pred[i] == 2 and examples[i]['label'] == 1):
@@ -449,7 +451,8 @@ class modelClassifier:
                     fh = wrong_file
                 fh.write("S1: {}\n".format(examples[i]["sentence1"].encode('utf-8')))
                 fh.write("S2: {}\n".format(examples[i]["sentence2"].encode('utf-8')))
-                fh.write("Label:      {}\n".format(examples[i]['gold_label']))
+                label_str = examples[i]['gold_label'] if not pw else LABEL[examples[i]['gold_label']]
+                fh.write("Label:      {}\n".format(label_str))
                 fh.write("Prediction: {}\n".format(LABEL[pred[i]]))
                 fh.write("confidence: \nentailment: {}\nneutral: {}\ncontradiction: {}\n\n".format(logits[1+i, 0], logits[1+i,1], logits[1+i,2]))
 
