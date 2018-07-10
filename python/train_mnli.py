@@ -82,7 +82,8 @@ else:
 
     logger.Log("Loading embeddings")
     if config.finetune or config.train_pw_only or config.test_pw_only:
-        datasets = [training_pw, dev_pw, test_pw]
+        #datasets = [training_pw, dev_pw, test_pw]
+        datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
     else:
         datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
     indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
@@ -148,7 +149,7 @@ class modelClassifier:
         self.sess = None
         self.saver = tf.train.Saver()
 
-    def get_minibatch(self, dataset, start_index, end_index, training=False):
+    def get_minibatch(self, dataset, start_index, end_index, training=False, pw=False):
 
         # JAMES: data processing per batch
         indices = range(start_index, end_index)
@@ -164,11 +165,15 @@ class modelClassifier:
         premise_char_vectors = fill_feature_vector_with_cropping_or_padding([dataset[i]['sentence1_binary_parse_char_index'][:] for i in indices], premise_pad_crop_pair, 2, column_size=config.char_in_word_size)
         hypothesis_char_vectors = fill_feature_vector_with_cropping_or_padding([dataset[i]['sentence2_binary_parse_char_index'][:] for i in indices], hypothesis_pad_crop_pair, 2, column_size=config.char_in_word_size)
 
-        premise_pos_vectors = generate_pos_feature_tensor([dataset[i]['sentence1_parse'][:] for i in indices], premise_pad_crop_pair)
-        hypothesis_pos_vectors = generate_pos_feature_tensor([dataset[i]['sentence2_parse'][:] for i in indices], hypothesis_pad_crop_pair)
+        premise_pos_vectors = generate_pos_feature_tensor([dataset[i]['sentence1_parse'][:] for i in indices], premise_pad_crop_pair, pos_format=pw)
+        hypothesis_pos_vectors = generate_pos_feature_tensor([dataset[i]['sentence2_parse'][:] for i in indices], hypothesis_pad_crop_pair, pos_format=pw)
 
-        premise_exact_match = construct_one_hot_feature_tensor([shared_content[pairIDs[i]]["sentence1_token_exact_match_with_s2"][:] for i in range(len(indices))], premise_pad_crop_pair, 1)
-        hypothesis_exact_match = construct_one_hot_feature_tensor([shared_content[pairIDs[i]]["sentence2_token_exact_match_with_s1"][:] for i in range(len(indices))], hypothesis_pad_crop_pair, 1)
+        if pw:
+            premise_exact_match = construct_one_hot_feature_tensor([dataset[i]["sentence1_token_exact_match_with_s2"][:] for i in range(len(indices))], premise_pad_crop_pair, 1)
+            hypothesis_exact_match = construct_one_hot_feature_tensor([dataset[i]["sentence2_token_exact_match_with_s1"][:] for i in range(len(indices))], hypothesis_pad_crop_pair, 1)
+        else:
+            premise_exact_match = construct_one_hot_feature_tensor([shared_content[pairIDs[i]]["sentence1_token_exact_match_with_s2"][:] for i in range(len(indices))], premise_pad_crop_pair, 1)
+            hypothesis_exact_match = construct_one_hot_feature_tensor([shared_content[pairIDs[i]]["sentence2_token_exact_match_with_s1"][:] for i in range(len(indices))], hypothesis_pad_crop_pair, 1)
   
         premise_exact_match = np.expand_dims(premise_exact_match, 2)
         hypothesis_exact_match = np.expand_dims(hypothesis_exact_match, 2)
@@ -407,12 +412,12 @@ class modelClassifier:
                 minibatch_premise_vectors, minibatch_hypothesis_vectors, minibatch_labels, minibatch_genres, \
                 minibatch_pre_pos, minibatch_hyp_pos, _, premise_char_vectors, hypothesis_char_vectors, \
                 premise_exact_match, hypothesis_exact_match  = self.get_minibatch(
-                    examples, self.batch_size * i, self.batch_size * (i + 1))
+                    examples, self.batch_size * i, self.batch_size * (i + 1), pw=pw)
             else:
                 minibatch_premise_vectors, minibatch_hypothesis_vectors, minibatch_labels, minibatch_genres, \
                 minibatch_pre_pos, minibatch_hyp_pos, _, premise_char_vectors, hypothesis_char_vectors, \
                 premise_exact_match, hypothesis_exact_match = self.get_minibatch(
-                    examples, self.batch_size * i, len(examples))
+                    examples, self.batch_size * i, len(examples), pw=pw)
             feed_dict = {self.model.premise_x: minibatch_premise_vectors, 
                                 self.model.hypothesis_x: minibatch_hypothesis_vectors,
                                 self.model.y: minibatch_labels, 

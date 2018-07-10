@@ -66,13 +66,14 @@ def load_pw_data(path, shuffle=True):
     """
     data = []
     with open(path, encoding='utf-8') as f:
-        r = csv.reader(f, delimiter='\t')
+        #r = csv.reader(f, delimiter='\t')
         #header
-        next(r)
-        for row in r:
-            loaded_example = collections.defaultdict(str, {'sentence1': row[3], 'sentence2': row[4]})
-            loaded_example["label"] = PW_LABEL_MAP[int(row[5])]
-            loaded_example["genre"] = "pw"
+        #next(r)
+        for row in f:
+            loaded_example = json.loads(row)
+            #transform from ordinal scale to binary entailment vs. non-entailment
+            loaded_example['label'] = PW_LABEL_MAP[loaded_example[label]]
+            loaded_example['genre'] = 'pw'
             data.append(loaded_example)
         if shuffle:
             random.seed(1)
@@ -162,8 +163,6 @@ def worker(shared_content, dataset):
                     if matched:
                         s1_token_exact_match[i] = 1
                         s2_token_exact_match[j] = 1
-                         
-    
             
             content = {}
 
@@ -198,9 +197,6 @@ def sentences_to_padded_index_sequences(datasets):
     def tokenize(string):
         string = re.sub(r'\(|\)', '', string)
         return string.split()
-
-    
-    
 
     word_counter = collections.Counter()
     char_counter = collections.Counter()
@@ -300,8 +296,6 @@ def load_subword_list(sentences, rand = False):
 
     return np.array(list_of_vectors)
 
-
-
 def parsing_parse(parse):
     base_parse = [s.rstrip(" ").rstrip(")") for s in parse.split("(") if ")" in s]
     pos = [pair.split(" ")[0] for pair in base_parse]
@@ -321,10 +315,13 @@ def parse_to_pos_vector(parse, left_padding_and_cropping_pair = (0,0)): # ONE HO
             break
     return vector
 
-def generate_pos_feature_tensor(parses, left_padding_and_cropping_pairs):
+def generate_pos_feature_tensor(parses, left_padding_and_cropping_pairs, pos_format=False):
     pos_vectors = []
     for parse in parses:
-        pos = parsing_parse(parse)
+        if pos_format:
+            pos = parse.split()
+        else:
+            pos = parsing_parse(parse)
         pos_vector = [(idx, POS_dict.get(tag, 0)) for idx, tag in enumerate(pos)]
         pos_vectors.append(pos_vector)
 
@@ -339,10 +336,6 @@ def generate_quora_pos_feature_tensor(parses, left_padding_and_cropping_pairs):
 
     return construct_one_hot_feature_tensor(pos_vectors, left_padding_and_cropping_pairs, 2, column_size=len(POS_Tagging))
 
-
-
-
-
 def generate_crop_pad_pairs(sequences):
     seq_len = FIXED_PARAMETERS["seq_length"]
     list_of_pairs = []
@@ -355,7 +348,6 @@ def generate_crop_pad_pairs(sequences):
             left_cropping = int(random.uniform(0,1) * (len(sequence) - seq_len))
         list_of_pairs.append((left_padding, left_cropping))
     return list_of_pairs
-
 
 def fill_feature_vector_with_cropping_or_padding(sequences, left_padding_and_cropping_pairs, dim, column_size=None, dtype=np.int32):
     if dim == 1:
@@ -413,10 +405,6 @@ def construct_one_hot_feature_tensor(sequences, left_padding_and_cropping_pairs,
             raise NotImplementedError
 
     return np.array(tensor_list, dtype=dtype)
-
-
-
-
 
 def generate_manual_sample_minibatch(s1_tokenize, s2_tokenize, word_indices, char_indices):
 
@@ -542,7 +530,6 @@ def loadEmbedding_rand(path, word_indices, divident = 1.0): # TODO double embedd
                 except ValueError:
                     print(s[0])
                     continue
-
     return emb
 
 def all_lemmas(token):
@@ -552,6 +539,7 @@ def all_lemmas(token):
         for lemma in synsets.lemma_names():
             lemmas.append(lemma)
     return list(set(lemmas))
+
 def loadEmbedding_with_lemma(path, word_indices):
     j = 0
     n = len(word_indices)
