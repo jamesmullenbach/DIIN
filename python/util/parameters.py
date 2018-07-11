@@ -61,6 +61,7 @@ pa("--debug_model", action='store_true', help="debug model")
 pa("--batch_size", type=int, default=70, help="batch size") ####
 pa("--display_step", type=int, default=50, help='display steps')
 pa("--eval_step", type=int, default=1000, help='eval step')
+pa("--max_epochs", type=int, default=1000, help='max epochs to run')
 pa("--l2_regularization_ratio", type=float, default=9e-5, help='l2 regularization ratio') ##
 pa("--training_completely_on_snli", action='store_true', help='train completely on snli')
 pa("--use_lr_decay",action='store_true',help='lr decay')
@@ -161,19 +162,12 @@ pa("--first_scale_down_layer", action='store_false', help='first_scale_down_laye
 pa("--first_scale_down_layer_relu", action='store_true', help='first_scale_down_layer_relu') 
 pa("--first_scale_down_kernel", type=int, default=1, help='first_scale_down_kernel') ##
 
-
 pa("--dense_net_first_scale_down_ratio", type=float, default=0.3, help='dense_net_first_scale_down_ratio') ##
-
-
 
 pa("--snli_joint_train_with_mnli", action='store_true', help='snli joint train with mnli')
 
-
-
-
 pa("--embedding_replacing_rare_word_with_UNK", action='store_true', help='embedding_replacing_rare_word_with_UNK')
 pa("--UNK_threshold", type=int, default=5, help='UNK threshold')
-
 
 pa("--debug", action='store_true', help='debug mode')
 pa("--use_final_state", action='store_true', help='use final states with of the lstm')
@@ -183,6 +177,7 @@ pa("--visualize_dense_attention_logits", action='store_true', help='visualize th
 pa("--finetune", action="store_true", help="load saved model, and train it further on part-whole train set")
 pa("--train_pw_only", action="store_true", help="train new model on just the part-whole dataset")
 pa("--test_pw_only", action="store_true", help="evaluate a saved model on just the part-whole dev set")
+pa("--trained_on_nli", action="store_true", help="when using saved model, set this flag if it was trained on NLI")
 
 args = parser.parse_args()
 

@@ -80,8 +80,8 @@ else:
     dev_pw = load_pw_data(FIXED_PARAMETERS['dev_pws'])
     test_pw = load_pw_data(FIXED_PARAMETERS['test_pws'])
 
-    logger.Log("Loading embeddings")
-    if config.finetune or config.test_pw_only:
+    logger.Log("Preprocessing datasets")
+    if config.trained_on_nli and (config.finetune or config.test_pw_only):
         #still need other datasets so we can use models trained on (S/M)NLI
         datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
         indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
@@ -90,7 +90,7 @@ else:
         logger.Log("len(char_indices): {}".format(len(char_indices)))
         pw_datasets = [training_pw, dev_pw, test_pw]
         sentences_to_padded_index_sequences(pw_datasets, indices_to_words=indices_to_words, word_indices=word_indices, char_indices=char_indices, indices_to_char=indices_to_chars)
-    elif config.train_pw_only:
+    elif config.train_pw_only or config.test_pw_only:
         datasets = [training_pw, dev_pw, test_pw]
         indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
     else:
@@ -195,7 +195,7 @@ class modelClassifier:
 
 
     def train(self, train_mnli, train_snli, train_pw, dev_mat, dev_mismat, dev_snli, dev_pw, pw=False):
-        sess_config = tf.ConfigProto(log_device_placement=True)
+        sess_config = tf.ConfigProto()
         sess_config.gpu_options.allow_growth=True   
         self.sess = tf.Session(config=sess_config)
         self.sess.run(self.init)
@@ -353,7 +353,7 @@ class modelClassifier:
                         if self.alpha != 0.:
                             self.best_strain_acc = strain_acc
                         self.best_step = self.step
-                        logger.Log("Checkpointing with new best matched-dev accuracy: %f" %(self.best_dev_acc))
+                        logger.Log("Checkpointing with new best %s accuracy: %f" %(("part-whole" if pw else "matched-dev"), self.best_dev_acc))
 
                 # evaluate more frequently as performance plateaus
                 if not pw and self.best_dev_acc > 0.777 and not config.training_completely_on_snli:
@@ -391,10 +391,10 @@ class modelClassifier:
 
             # Early stopping
             self.early_stopping_step = 35000
+            # stop when average of last 5 train accuracies not significantly better than worst of last 5 train accuracies
             progress = 1000 * (sum(self.last_train_acc)/(5 * min(self.last_train_acc)) - 1) 
 
-            print(progress)
-            if (progress < 0.1) or (self.step > self.best_step + self.early_stopping_step):
+            if (progress < 0.1) or (self.step > self.best_step + self.early_stopping_step) or (self.epoch > config.max_epochs):
                 logger.Log("Best %s accuracy: %s" %(("pw" if pw else "matched-dev"), self.best_dev_acc))
                 logger.Log("%s Train accuracy: %s" %(("pw" if pw else "MultiNLI"), self.best_train_acc))
                 if config.training_completely_on_snli:
@@ -550,7 +550,7 @@ elif test == False:
         logger.Log("Generating SNLI test pred")
         test_snli_path = os.path.join(FIXED_PARAMETERS["log_path"], "snli_test_{}.csv".format(modname))
         classifier.generate_predictions_with_id(test_snli_path, test_snli)
-    else:
+    elif not pw:
         logger.Log("Generating dev matched answers.")
         dev_matched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_matched_submission_{}.csv".format(modname))
         classifier.generate_predictions_with_id(dev_matched_path, dev_matched)
@@ -577,18 +577,19 @@ else:
         logger.Log("Confusion Matrix \n{}".format(pws_dev_set_eval[2]))
 
         # MULTINLI dev matched
-        matched_multinli_dev_set_eval = evaluate_classifier(classifier.classify, dev_matched, FIXED_PARAMETERS["batch_size"])
-        logger.Log("Acc on matched multiNLI dev-set: %s" %(matched_multinli_dev_set_eval[0]))
-        logger.Log("Confusion Matrix \n{}".format(matched_multinli_dev_set_eval[2]))
+        if config.trained_on_nli and (config.finetune or config.test_pw_only):
+            matched_multinli_dev_set_eval = evaluate_classifier(classifier.classify, dev_matched, FIXED_PARAMETERS["batch_size"])
+            logger.Log("Acc on matched multiNLI dev-set: %s" %(matched_multinli_dev_set_eval[0]))
+            logger.Log("Confusion Matrix \n{}".format(matched_multinli_dev_set_eval[2]))
 
-        # MULTINLI dev mismatched
-        mismatched_multinli_dev_set_eval = evaluate_classifier(classifier.classify, dev_mismatched, FIXED_PARAMETERS["batch_size"])
-        logger.Log("Acc on mismatched multiNLI dev-set: %s" %(mismatched_multinli_dev_set_eval[0]))
-        logger.Log("Confusion Matrix \n{}".format(mismatched_multinli_dev_set_eval[2]))
+            # MULTINLI dev mismatched
+            mismatched_multinli_dev_set_eval = evaluate_classifier(classifier.classify, dev_mismatched, FIXED_PARAMETERS["batch_size"])
+            logger.Log("Acc on mismatched multiNLI dev-set: %s" %(mismatched_multinli_dev_set_eval[0]))
+            logger.Log("Confusion Matrix \n{}".format(mismatched_multinli_dev_set_eval[2]))
 
-        logger.Log("Generating dev matched answers.")
-        dev_matched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_matched_submission_{}.csv".format(modname))
-        classifier.generate_predictions_with_id(dev_matched_path, dev_matched)
-        logger.Log("Generating dev mismatched answers.")
-        dev_mismatched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_mismatched_submission_{}.csv".format(modname))
-        classifier.generate_predictions_with_id(dev_mismatched_path, dev_mismatched)
+            logger.Log("Generating dev matched answers.")
+            dev_matched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_matched_submission_{}.csv".format(modname))
+            classifier.generate_predictions_with_id(dev_matched_path, dev_matched)
+            logger.Log("Generating dev mismatched answers.")
+            dev_mismatched_path = os.path.join(FIXED_PARAMETERS["log_path"], "dev_mismatched_submission_{}.csv".format(modname))
+            classifier.generate_predictions_with_id(dev_mismatched_path, dev_mismatched)
