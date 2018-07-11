@@ -81,18 +81,27 @@ else:
     test_pw = load_pw_data(FIXED_PARAMETERS['test_pws'])
 
     logger.Log("Loading embeddings")
-    if config.finetune or config.train_pw_only or config.test_pw_only:
-        #datasets = [training_pw, dev_pw, test_pw]
+    if config.finetune or config.test_pw_only:
         #still need other datasets so we can use models trained on (S/M)NLI
-        datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli, training_pw, dev_pw, test_pw]
+        datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
+        indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
+
+        logger.Log("use existing lookups to process PW datasets")
+        logger.Log("len(char_indices): {}".format(len(char_indices)))
+        pw_datasets = [training_pw, dev_pw, test_pw]
+        sentences_to_padded_index_sequences(pw_datasets, indices_to_words=indices_to_words, word_indices=word_indices, char_indices=char_indices, indices_to_char=indices_to_chars)
+    elif config.train_pw_only:
+        datasets = [training_pw, dev_pw, test_pw]
+        indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
     else:
         datasets = [training_mnli, training_snli, dev_matched, dev_mismatched, test_matched, test_mismatched, dev_snli, test_snli]
-    indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
+        indices_to_words, word_indices, char_indices, indices_to_chars = sentences_to_padded_index_sequences(datasets)
 
 config.char_vocab_size = len(char_indices.keys())
 
 # JAMES: make embedding path
-embedding_dir = os.path.join(config.datapath, "embeddings")
+#embedding_dir = os.path.join(config.datapath, "embeddings")
+embedding_dir = config.embedpath
 if not os.path.exists(embedding_dir):
     os.makedirs(embedding_dir)
 
@@ -185,7 +194,7 @@ class modelClassifier:
                 
 
 
-    def train(self, train_mnli, train_snli, train_pw, dev_mat, dev_mismat, dev_snli, dev_pw):
+    def train(self, train_mnli, train_snli, train_pw, dev_mat, dev_mismat, dev_snli, dev_pw, pw=False):
         sess_config = tf.ConfigProto(log_device_placement=True)
         sess_config.gpu_options.allow_growth=True   
         self.sess = tf.Session(config=sess_config)
@@ -193,8 +202,8 @@ class modelClassifier:
 
         self.step = 0
         self.epoch = 0
-        self.best_dev_mat = 0.
-        self.best_mtrain_acc = 0.
+        self.best_dev_acc = 0.
+        self.best_train_acc = 0.
         self.last_train_acc = [.001, .001, .001, .001, .001]
         self.best_step = 0
         self.train_dev_set = False
@@ -211,15 +220,15 @@ class modelClassifier:
                 dev_acc_mat, dev_cost_mat, confmx = evaluate_classifier(self.classify, dev_mat, self.batch_size)
                 best_dev_mismat, dev_cost_mismat, _ = evaluate_classifier(self.classify, dev_mismat, self.batch_size)
                 best_dev_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
-                self.best_mtrain_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_mnli[0:5000], self.batch_size)
+                self.best_train_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_mnli[0:5000], self.batch_size)
                 logger.Log("Confusion Matrix on dev-matched\n{}".format(confmx))
                 if self.alpha != 0.:
                     self.best_strain_acc, strain_cost, _  = evaluate_classifier(self.classify, train_snli[0:5000], self.batch_size)
-                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f\n Restored best SNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli,  self.best_mtrain_acc,  self.best_strain_acc))
+                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f\n Restored best SNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli,  self.best_train_acc,  self.best_strain_acc))
                 else:
-                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli, self.best_mtrain_acc))
+                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli, self.best_train_acc))
                 if config.training_completely_on_snli:
-                    self.best_dev_mat = best_dev_snli
+                    self.best_dev_acc = best_dev_snli
             else:
                 self.saver.restore(self.sess, ckpt_file)
             logger.Log("Model restored from file: %s" % ckpt_file)
@@ -257,7 +266,7 @@ class modelClassifier:
                 minibatch_premise_vectors, minibatch_hypothesis_vectors, minibatch_labels, minibatch_genres, \
                 minibatch_pre_pos, minibatch_hyp_pos, pairIDs, premise_char_vectors, hypothesis_char_vectors, \
                 premise_exact_match, hypothesis_exact_match  = self.get_minibatch(
-                    training_data, self.batch_size * i, self.batch_size * (i + 1), True)
+                    training_data, self.batch_size * i, self.batch_size * (i + 1), True, pw=pw)
                 
                 # Run the optimizer to take a gradient step, and also fetch the value of the 
                 # cost function for logging
@@ -284,9 +293,9 @@ class modelClassifier:
                     # EVALUATE CURRENT MODEL
                     if config.training_completely_on_snli and self.dont_print_unnecessary_info:
                         dev_acc_mat = dev_cost_mat = 1.0
-                    elif config.finetune or config.train_pw_only:
+                    elif pw:
                         # EVALUATE ON PW
-                        dev_acc_mat, dev_cost_mat, confmx = evaluate_classifier(self.classify, dev_pw, self.batch_size)
+                        dev_acc_pw, dev_cost_pw, confmx = evaluate_classifier(self.classify, dev_pw, self.batch_size, pw=pw)
                     else:
                         # EVALUATE ON MATCHED MULTINLI
                         dev_acc_mat, dev_cost_mat, confmx = evaluate_classifier(self.classify, dev_mat, self.batch_size)
@@ -294,9 +303,9 @@ class modelClassifier:
                     
                     if config.training_completely_on_snli:
                         # EVALUATE ON SNLI
-                            dev_acc_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
-                            dev_acc_mismat, dev_cost_mismat = 0,0
-                    elif not self.dont_print_unnecessary_info or 100 * (1 - self.best_dev_mat / dev_acc_mat) > 0.04:
+                        dev_acc_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
+                        dev_acc_mismat, dev_cost_mismat = 0,0
+                    elif not pw and (not self.dont_print_unnecessary_info or 100 * (1 - self.best_dev_acc / dev_acc_mat) > 0.04):
                         # EVALUATE ON MISMATCHED MULTINLI
                         dev_acc_mismat, dev_cost_mismat, _ = evaluate_classifier(self.classify, dev_mismat, self.batch_size)
                         dev_acc_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
@@ -305,15 +314,15 @@ class modelClassifier:
 
                     if self.dont_print_unnecessary_info and config.training_completely_on_snli:
                         mtrain_acc, mtrain_cost, = 0, 0
-                    elif config.finetune or config.train_pw_only:
+                    elif pw:
                         # EVALUATE ON TRAIN PW
-                        mtrain_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_pw[0:5000], self.batch_size)
+                        train_acc_pw, train_cost_pw, _ = evaluate_classifier(self.classify, train_pw[0:5000], self.batch_size, pw=pw)
                     else:
                         # EVALUATE ON TRAIN MULTINLI
                         mtrain_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_mnli[0:5000], self.batch_size)
                     
                     if self.alpha != 0.:
-                        if not self.dont_print_unnecessary_info or 100 * (1 - self.best_dev_mat / dev_acc_mat) > 0.04:
+                        if not pw and (not self.dont_print_unnecessary_info or 100 * (1 - self.best_dev_acc / dev_acc_mat) > 0.04):
                             strain_acc, strain_cost,_ = evaluate_classifier(self.classify, train_snli[0:5000], self.batch_size)
                         elif config.training_completely_on_snli:
                             strain_acc, strain_cost,_ = evaluate_classifier(self.classify, train_snli[0:5000], self.batch_size)
@@ -321,6 +330,8 @@ class modelClassifier:
                             strain_acc, strain_cost = 0, 0
                         logger.Log("Step: %i\t Dev-matched acc: %f\t Dev-mismatched acc: %f\t Dev-SNLI acc: %f\t MultiNLI train acc: %f\t SNLI train acc: %f" %(self.step, dev_acc_mat, dev_acc_mismat, dev_acc_snli, mtrain_acc, strain_acc))
                         logger.Log("Step: %i\t Dev-matched cost: %f\t Dev-mismatched cost: %f\t Dev-SNLI cost: %f\t MultiNLI train cost: %f\t SNLI train cost: %f" %(self.step, dev_cost_mat, dev_cost_mismat, dev_cost_snli, mtrain_cost, strain_cost))
+                    elif pw:
+                        logger.Log("Step: %i\t Dev pw cost: %f\t Train pw cost: %f" % (self.step, dev_cost_pw, train_cost_pw))
                     else:
                         logger.Log("Step: %i\t Dev-matched acc: %f\t Dev-mismatched acc: %f\t Dev-SNLI acc: %f\t MultiNLI train acc: %f" %(self.step, dev_acc_mat, dev_acc_mismat, dev_acc_snli, mtrain_acc))
                         logger.Log("Step: %i\t Dev-matched cost: %f\t Dev-mismatched cost: %f\t Dev-SNLI cost: %f\t MultiNLI train cost: %f" %(self.step, dev_cost_mat, dev_cost_mismat, dev_cost_snli, mtrain_cost))
@@ -331,31 +342,34 @@ class modelClassifier:
                     if config.training_completely_on_snli:
                         dev_acc_mat = dev_acc_snli
                         mtrain_acc = strain_acc
-                    best_test = 100 * (1 - self.best_dev_mat / dev_acc_mat)
+                    dev_acc = dev_acc_pw if pw else dev_acc_mat
+                    best_test = 100 * (1 - self.best_dev_acc / dev_acc)
                     if best_test > 0.04:
                         self.saver.save(self.sess, ckpt_file + "_best")
-                        self.best_dev_mat = dev_acc_mat
-                        self.best_mtrain_acc = mtrain_acc
+                        self.best_dev_acc = dev_acc
+
+                        train_acc = train_acc_pw if pw else mtrain_acc
+                        self.best_train_acc = train_acc
                         if self.alpha != 0.:
                             self.best_strain_acc = strain_acc
                         self.best_step = self.step
-                        logger.Log("Checkpointing with new best matched-dev accuracy: %f" %(self.best_dev_mat))
+                        logger.Log("Checkpointing with new best matched-dev accuracy: %f" %(self.best_dev_acc))
 
                 # evaluate more frequently as performance plateaus
-                if self.best_dev_mat > 0.777 and not config.training_completely_on_snli:
+                if not pw and self.best_dev_acc > 0.777 and not config.training_completely_on_snli:
                     self.eval_step = 500
                     self.save_step = 500
 
-                if self.best_dev_mat > 0.780 and not config.training_completely_on_snli:
+                if not pw and self.best_dev_acc > 0.780 and not config.training_completely_on_snli:
                     self.eval_step = 100
                     self.save_step = 100
                     self.dont_print_unnecessary_info = True 
 
-                if self.best_dev_mat > 0.872 and config.training_completely_on_snli:
+                if not pw and self.best_dev_acc > 0.872 and config.training_completely_on_snli:
                     self.eval_step = 500
                     self.save_step = 500
                 
-                if self.best_dev_mat > 0.878 and config.training_completely_on_snli:
+                if not pw and self.best_dev_acc > 0.878 and config.training_completely_on_snli:
                     self.eval_step = 100
                     self.save_step = 100
                     self.dont_print_unnecessary_info = True 
@@ -372,16 +386,17 @@ class modelClassifier:
                 logger.Log("Epoch: %i\t Avg. Cost: %f" %(self.epoch+1, avg_cost))
             
             self.epoch += 1 
-            self.last_train_acc[(self.epoch % 5) - 1] = mtrain_acc
+            train_acc = train_acc_pw if pw else mtrain_acc
+            self.last_train_acc[(self.epoch % 5) - 1] = train_acc
 
             # Early stopping
             self.early_stopping_step = 35000
             progress = 1000 * (sum(self.last_train_acc)/(5 * min(self.last_train_acc)) - 1) 
 
-
+            print(progress)
             if (progress < 0.1) or (self.step > self.best_step + self.early_stopping_step):
-                logger.Log("Best matched-dev accuracy: %s" %(self.best_dev_mat))
-                logger.Log("MultiNLI Train accuracy: %s" %(self.best_mtrain_acc))
+                logger.Log("Best %s accuracy: %s" %(("pw" if pw else "matched-dev"), self.best_dev_acc))
+                logger.Log("%s Train accuracy: %s" %(("pw" if pw else "MultiNLI"), self.best_train_acc))
                 if config.training_completely_on_snli:
                     self.train_dev_set = True
 
@@ -442,7 +457,7 @@ class modelClassifier:
             wrong_file = open(os.path.join(FIXED_PARAMETERS["log_path"], wrong_fname), 'w')
 
             pred = np.argmax(logits[1:], axis=1)
-            LABEL = ["entailment", "neutral", "contradiction"] if not pw else ["entailment", "non-entailment"]
+            LABEL = ["entailment", "neutral", "contradiction"] if not pw else ["entailment", "non-entailment", "non-entailment"]
             for i in tqdm(range(pred.shape[0])):
                 #coalesce neutral and contradiction into "non-entailment" for PW
                 if pred[i] == examples[i]["label"] or (pw and pred[i] == 2 and examples[i]['label'] == 1):
@@ -516,14 +531,16 @@ if config.preprocess_data_only:
 elif test == False:
     # JAMES: train unless we passed the --test param
 
-    classifier.train(training_mnli, training_snli, training_pw, dev_matched, dev_mismatched, dev_snli, dev_pw)
-    if not (config.finetune or config.train_pw_only):
+    pw = config.finetune or config.train_pw_only
+    print("Training on PW only? %s" % "yes" if pw else "no")
+    classifier.train(training_mnli, training_snli, training_pw, dev_matched, dev_mismatched, dev_snli, dev_pw, pw=pw)
+    if not pw:
         logger.Log("Acc on matched multiNLI dev-set: %s" %(evaluate_classifier(classifier.classify, dev_matched, FIXED_PARAMETERS["batch_size"]))[0])
         logger.Log("Acc on mismatched multiNLI dev-set: %s" %(evaluate_classifier(classifier.classify, dev_mismatched, FIXED_PARAMETERS["batch_size"]))[0])
         logger.Log("Acc on SNLI test-set: %s" %(evaluate_classifier(classifier.classify, test_snli, FIXED_PARAMETERS["batch_size"]))[0])
     else:
         #evaluate on part-wholes only
-        logger.Log("Acc on part-whole dev-set: %s" %(evaluate_classifier(classifier.classify, dev_pw, FIXED_PARAMETERS["batch_size"], pws=True))[0])
+        logger.Log("Acc on part-whole dev-set: %s" %(evaluate_classifier(classifier.classify, dev_pw, FIXED_PARAMETERS["batch_size"], pw=pw))[0])
 
     if config.training_completely_on_snli:
         logger.Log("Generating SNLI dev pred")

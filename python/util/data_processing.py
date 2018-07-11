@@ -10,6 +10,7 @@ import re
 
 import util.parameters as params
 
+import ftfy
 import nltk
 from nltk.corpus import wordnet as wn 
 from nltk.tag import StanfordNERTagger
@@ -190,11 +191,10 @@ def load_mnli_shared_content():
         load_shared_content(f, shared_content)
     return shared_content
 
-def sentences_to_padded_index_sequences(datasets):
+def sentences_to_padded_index_sequences(datasets, indices_to_words=None, word_indices=None, char_indices=None, indices_to_char=None):
     """
     Annotate datasets with feature vectors. Adding right-sided padding. 
     """
-    # Extract vocabulary
     def tokenize(string):
         string = re.sub(r'\(|\)', '', string)
         return string.split()
@@ -203,6 +203,10 @@ def sentences_to_padded_index_sequences(datasets):
     char_counter = collections.Counter()
     for i, dataset in enumerate(datasets):
         for example in tqdm(dataset):
+            #fix dumb unicode stuff from our PW data
+            if all([arg is not None for arg in [indices_to_words, word_indices, char_indices, indices_to_char]]):
+                example['sentence1_binary_parse'] = ftfy.fix_text(example['sentence1_binary_parse'])
+                example['sentence2_binary_parse'] = ftfy.fix_text(example['sentence2_binary_parse'])
             s1_tokenize = tokenize(example['sentence1_binary_parse'])
             s2_tokenize = tokenize(example['sentence2_binary_parse'])
 
@@ -214,20 +218,20 @@ def sentences_to_padded_index_sequences(datasets):
             for word in s2_tokenize:
                 char_counter.update([c for c in word])
 
-    vocabulary = set([word for word in word_counter])
-    vocabulary = list(vocabulary)
-    if config.embedding_replacing_rare_word_with_UNK: 
-        vocabulary = [PADDING, "<UNK>"] + vocabulary
-    else:
-        vocabulary = [PADDING] + vocabulary
-    word_indices = dict(zip(vocabulary, range(len(vocabulary))))
-    indices_to_words = {v: k for k, v in word_indices.items()}
-    char_vocab = set([char for char in char_counter])
-    char_vocab = list(char_vocab)
-    char_vocab = [PADDING] + char_vocab
-    char_indices = dict(zip(char_vocab, range(len(char_vocab))))
-    indices_to_char = {v: k for k, v in char_indices.items()}
-    
+    if any([arg is None for arg in [indices_to_words, word_indices, char_indices, indices_to_char]]):
+        vocabulary = set([word for word in word_counter])
+        vocabulary = list(vocabulary)
+        if config.embedding_replacing_rare_word_with_UNK: 
+            vocabulary = [PADDING, "<UNK>"] + vocabulary
+        else:
+            vocabulary = [PADDING] + vocabulary
+        word_indices = dict(zip(vocabulary, range(len(vocabulary))))
+        indices_to_words = {v: k for k, v in word_indices.items()}
+        char_vocab = set([char for char in char_counter])
+        char_vocab = list(char_vocab)
+        char_vocab = [PADDING] + char_vocab
+        char_indices = dict(zip(char_vocab, range(len(char_vocab))))
+        indices_to_char = {v: k for k, v in char_indices.items()}
 
     for i, dataset in enumerate(datasets):
         for example in tqdm(dataset):
@@ -244,7 +248,7 @@ def sentences_to_padded_index_sequences(datasets):
                         itf = 0
                     else:
                         if config.embedding_replacing_rare_word_with_UNK:
-                            index = word_indices[token_sequence[i]] if word_counter[token_sequence[i]] >= config.UNK_threshold else word_indices["<UNK>"]
+                            index = word_indices[token_sequence[i]] if (word_counter[token_sequence[i]] >= config.UNK_threshold and token_sequence[i] in word_indices) else word_indices["<UNK>"]
                         else:
                             index = word_indices[token_sequence[i]]
                         itf = 1 / (word_counter[token_sequence[i]] + 1)
@@ -262,7 +266,7 @@ def sentences_to_padded_index_sequences(datasets):
                             if j >= (len(chars)):
                                 break
                             else:
-                                index = char_indices[chars[j]]
+                                index = 0 if chars[j] not in char_indices else char_indices[chars[j]]
                             example[sentence + '_char_index'][i,j] = index 
 
     return indices_to_words, word_indices, char_indices, indices_to_char
