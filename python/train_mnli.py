@@ -217,21 +217,26 @@ class modelClassifier:
             if os.path.isfile(ckpt_file + "_best.meta"):
                 self.saver.restore(self.sess, (ckpt_file + "_best"))
                 self.completed = False
-                dev_acc_mat, dev_cost_mat, confmx = evaluate_classifier(self.classify, dev_mat, self.batch_size)
-                best_dev_mismat, dev_cost_mismat, _ = evaluate_classifier(self.classify, dev_mismat, self.batch_size)
-                best_dev_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
-                self.best_train_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_mnli[0:5000], self.batch_size)
-                logger.Log("Confusion Matrix on dev-matched\n{}".format(confmx))
-                if self.alpha != 0.:
-                    self.best_strain_acc, strain_cost, _  = evaluate_classifier(self.classify, train_snli[0:5000], self.batch_size)
-                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f\n Restored best SNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli,  self.best_train_acc,  self.best_strain_acc))
-                else:
-                    logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli, self.best_train_acc))
-                if config.training_completely_on_snli:
-                    self.best_dev_acc = best_dev_snli
+                if not config.finetune:
+                    # pickup from checkpoint on NLI
+                    dev_acc_mat, dev_cost_mat, confmx = evaluate_classifier(self.classify, dev_mat, self.batch_size)
+                    best_dev_mismat, dev_cost_mismat, _ = evaluate_classifier(self.classify, dev_mismat, self.batch_size)
+                    best_dev_snli, dev_cost_snli, _ = evaluate_classifier(self.classify, dev_snli, self.batch_size)
+                    self.best_train_acc, mtrain_cost, _ = evaluate_classifier(self.classify, train_mnli[0:5000], self.batch_size)
+                    logger.Log("Confusion Matrix on dev-matched\n{}".format(confmx))
+                    if self.alpha != 0.:
+                        self.best_strain_acc, strain_cost, _  = evaluate_classifier(self.classify, train_snli[0:5000], self.batch_size)
+                        logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f\n Restored best SNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli,  self.best_train_acc,  self.best_strain_acc))
+                    else:
+                        logger.Log("Restored best matched-dev acc: %f\n Restored best mismatched-dev acc: %f\n Restored best SNLI-dev acc: %f\n Restored best MulitNLI train acc: %f" %(dev_acc_mat, best_dev_mismat, best_dev_snli, self.best_train_acc))
+                    if config.training_completely_on_snli:
+                        self.best_dev_acc = best_dev_snli
             else:
                 self.saver.restore(self.sess, ckpt_file)
             logger.Log("Model restored from file: %s" % ckpt_file)
+        if config.finetune:
+            assert os.path.isfile(ckpt_file + '.meta'), "Need to use existing run as input when finetuning"
+            ckpt_file = ckpt_file + "_finetune"
 
         # Combine MultiNLI and SNLI data. Alpha has a default value of .15
         beta = int(self.alpha * len(train_snli))
@@ -247,7 +252,7 @@ class modelClassifier:
                 beta = int(self.alpha * len(train_mnli))
                 if config.snli_joint_train_with_mnli:
                     training_data = train_snli + random.sample(train_mnli, beta)
-            elif config.finetune or config.train_pw_only:
+            elif pw:
                 training_data = train_pw
             else:
                 training_data = train_mnli + random.sample(train_snli, beta)
@@ -410,7 +415,10 @@ class modelClassifier:
     def classify(self, examples, pw=False):
         # This classifies a list of examples
         if (test == True) or (self.completed == True):
-            best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_best"
+            if config.finetune:
+                best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_finetune_best"
+            else:
+                best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_best"
             self.sess = tf.Session()
             self.sess.run(self.init)
             self.saver.restore(self.sess, best_path)
@@ -477,7 +485,10 @@ class modelClassifier:
 
     def generate_predictions_with_id(self, path, examples):
         if (test == True) or (self.completed == True):
-            best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_best"
+            if config.finetune:
+                best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_finetune_best"
+            else:
+                best_path = os.path.join(FIXED_PARAMETERS["ckpt_path"], modname) + ".ckpt_best"
             self.sess = tf.Session()
             self.sess.run(self.init)
             self.saver.restore(self.sess, best_path)
